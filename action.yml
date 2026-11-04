@@ -1,0 +1,57 @@
+name: CAA lint
+description: Lint CAA DNS records for a domain and fail CI on missing or unauthorized issuers.
+author: TigerTrust
+
+branding:
+  icon: shield
+  color: orange
+
+inputs:
+  domain:
+    description: Domain to check.
+    required: true
+  expect_issue:
+    description: Comma-separated CA issuer-domains that MUST be authorized.
+    required: false
+    default: ''
+  require_iodef:
+    description: Require an iodef record.
+    required: false
+    default: 'false'
+  fail_on_missing:
+    description: Exit 1 when no CAA records exist at the domain or any parent.
+    required: false
+    default: 'true'
+  dns:
+    description: Override DNS server (e.g. 1.1.1.1).
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+
+    - name: Install caa-lint
+      shell: bash
+      run: |
+        ref="${{ github.action_ref }}"
+        if [ -z "$ref" ]; then ref="main"; fi
+        go install "github.com/tigertrust/caa-lint/cmd/caa-lint@${ref}"
+
+    - name: Run caa-lint
+      shell: bash
+      run: |
+        args=(--domain "${{ inputs.domain }}")
+        if [ "${{ inputs.fail_on_missing }}" = "true" ]; then args+=(--fail-on-missing); fi
+        if [ "${{ inputs.require_iodef }}" = "true" ]; then args+=(--require-iodef); fi
+        if [ -n "${{ inputs.dns }}" ]; then args+=(--dns "${{ inputs.dns }}"); fi
+        IFS=',' read -ra CAs <<< "${{ inputs.expect_issue }}"
+        for ca in "${CAs[@]}"; do
+          ca_trim="$(echo "$ca" | xargs)"
+          if [ -n "$ca_trim" ]; then args+=(--expect-issue "$ca_trim"); fi
+        done
+        "$(go env GOPATH)/bin/caa-lint" "${args[@]}"
